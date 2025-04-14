@@ -1,0 +1,119 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  // output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+
+
+
+
+
+// Purpose: Links messages and conversations to your WhatsApp Business account’s phone number.
+// Why Needed: The API’s webhook includes metadata.phone_number_id to identify which phone number received/sent a message.
+// Notes: Use phone_number_id from the webhook’s metadata as the id. Supports multiple numbers if your app scales.
+
+
+model PhoneNumbers {
+  id                String    @id   // Primary key (WhatsApp phone_number_id from API metadata)
+  displayPhoneNumber String    @unique  // e.g., "15551234567"
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  conversations     Conversations[]
+  messages          Messages[]
+}
+
+
+
+
+
+
+// Purpose: Tracks users for chat lists and message attribution.
+// Why Needed: Webhook payloads include contacts with wa_id (phone number) and profile.name. This table maps wa_id to display names.
+// Notes: profileName is nullable since not all contacts provide a name. Update it when new webhook data arrives.
+
+
+model Contacts {
+  waId              String    @id // Primary key (WhatsApp ID, e.g., phone number "1234567890")
+  profileName       String?   // Contact’s name from webhook (contacts.profile.name)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  conversations     Conversations[]
+  messages          Messages[]
+}
+
+
+
+
+
+
+// Purpose: Represents a chat thread with a contact, shown in the interface’s sidebar.
+// Why Needed: Simplifies fetching recent chats and their latest messages (like WhatsApp’s chat list).
+// Notes: lastMessageId and lastMessageAt are updated whenever a new message arrives to keep the chat list ordered.
+
+
+model Conversations {
+  id                String    @id @default(uuid())
+  phoneNumberId     String
+  contactWaId       String
+  lastMessageId     String?
+  lastMessageAt     DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  phoneNumber       PhoneNumbers @relation(fields: [phoneNumberId], references: [id])
+  contact           Contacts     @relation(fields: [contactWaId], references: [waId])
+  messages          Messages[]   @relation("ConversationMessages")
+  lastMessage       Messages?    @relation("ConversationLastMessage", fields: [lastMessageId], references: [id])
+  @@unique([phoneNumberId, contactWaId])    // One conversation per contact per phone number
+  Messages Messages[]
+}
+
+
+
+// Purpose: Stores all message details for rendering chat history.
+// Why Needed: Captures webhook data (messages and statuses) and supports the interface’s conversation view.
+// Notes:
+// id uses the webhook’s messages.id (e.g., "wamid.xxx") for uniqueness.
+// type maps to webhook’s type (e.g., "text", "image").
+// textBody, mediaId, etc., are nullable to store only relevant data per type.
+// isFromUs distinguishes sent vs. received messages for UI (e.g., right vs. left bubbles).
+// status is updated via webhook statuses (sent, delivered, read, failed).
+// mediaUrl is optional if you download media to your server (recommended for performance).
+
+
+model Messages {
+  id                String    @id
+  conversationId    String
+  phoneNumberId     String
+  contactWaId       String
+  type              String
+  textBody          String?
+  mediaId           String?
+  mediaMimeType     String?
+  mediaUrl          String?
+  caption           String?
+  location          Json?
+  isFromUs          Boolean
+  status            String
+  timestamp         DateTime
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  conversation      Conversations @relation(fields: [conversationId], references: [id])
+  phoneNumber       PhoneNumbers  @relation(fields: [phoneNumberId], references: [id])
+  contact           Contacts      @relation(fields: [contactWaId], references: [waId])
+
+  Conversations Conversations[] @relation("ConversationMessages")
+
+  ConversationsLastMessage Conversations[] @relation("ConversationLastMessage")
+}
